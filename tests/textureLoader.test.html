@@ -1,0 +1,102 @@
+<!-- tests/textureLoader.test.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>TextureLoader Unit Tests</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green}
+    .fail{color:red}
+    pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <h2>TextureLoader Unit Tests</h2>
+  <div id="results"></div>
+
+  <script type="module">
+    import { loadTexture } from '../src/textureLoader.js';
+
+    const resultsEl = document.getElementById('results');
+
+    function pass(name) {
+      const el = document.createElement('div');
+      el.className = 'ok';
+      el.textContent = 'PASS: ' + name;
+      resultsEl.appendChild(el);
+      console.log('PASS:', name);
+    }
+
+    function fail(name, err) {
+      const el = document.createElement('div');
+      el.className = 'fail';
+      el.innerHTML = 'FAIL: ' + name + '<pre>' + (err && err.stack ? err.stack : String(err)) + '</pre>';
+      resultsEl.appendChild(el);
+      console.error('FAIL:', name, err);
+    }
+
+    async function run() {
+      // UT2.1: loadTexture resolves for a valid PNG blob
+      try {
+        // create a tiny 2x2 PNG via canvas
+        const c = document.createElement('canvas');
+        c.width = 2; c.height = 2;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'rgb(255,0,0)'; ctx.fillRect(0,0,1,1);
+        ctx.fillStyle = 'rgb(0,255,0)'; ctx.fillRect(1,0,1,1);
+        ctx.fillStyle = 'rgb(0,0,255)'; ctx.fillRect(0,1,1,1);
+        ctx.fillStyle = 'rgb(255,255,0)'; ctx.fillRect(1,1,1,1);
+        const dataUrl = c.toDataURL('image/png');
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const out = await loadTexture(blob);
+        if (out && out.width === 2 && out.height === 2 && out.imageData && out.imageData.data.length === 16) {
+          pass('UT2.1 loadTexture resolves for valid PNG blob');
+        } else {
+          throw new Error('Unexpected output: ' + JSON.stringify({ width: out.width, height: out.height }));
+        }
+      } catch (e) { fail('UT2.1 loadTexture resolves for valid PNG blob', e); }
+
+      // UT2.2: loadTexture rejects for unsupported format
+      try {
+        let threw = false;
+        try {
+          await loadTexture({}); // unsupported object
+        } catch (e) {
+          threw = true;
+        }
+        if (threw) pass('UT2.2 loadTexture rejects for unsupported format');
+        else throw new Error('Did not reject for unsupported format');
+      } catch (e) { fail('UT2.2 loadTexture rejects for unsupported format', e); }
+
+      // UT2.3: returned object contains numeric width/height and imageData length equals width*height*4
+      try {
+        const c = document.createElement('canvas');
+        c.width = 4; c.height = 3;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'black'; ctx.fillRect(0,0,4,3);
+        const dataUrl = c.toDataURL('image/png');
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const out = await loadTexture(blob);
+        const expectedLen = out.width * out.height * 4;
+        if (typeof out.width === 'number' && typeof out.height === 'number' && out.imageData.data.length === expectedLen) {
+          pass('UT2.3 returned object shape and imageData length correct');
+        } else {
+          throw new Error('Mismatch: ' + JSON.stringify({ width: out.width, height: out.height, len: out.imageData.data.length, expectedLen }));
+        }
+      } catch (e) { fail('UT2.3 returned object shape and imageData length correct', e); }
+
+      // Summary
+      const summary = document.createElement('div');
+      summary.style.marginTop = '16px';
+      summary.textContent = 'Tests complete. Check console for details.';
+      resultsEl.appendChild(summary);
+    }
+
+    run();
+  </script>
+</body>
+</html>

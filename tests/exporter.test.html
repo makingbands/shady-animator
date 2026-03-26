@@ -1,0 +1,58 @@
+<!-- tests/exporter.test.html -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>Exporter Unit Tests</title>
+  <style>body{font-family:system-ui,Arial;margin:16px} .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}</style>
+</head>
+<body>
+  <h2>Exporter Unit Tests</h2>
+  <div id="results"></div>
+  <script type="module">
+    import { encodeMaskRLE, decodeMaskRLE, exportProject, exportPackage } from '../src/exporter.js';
+    const results = document.getElementById('results');
+    function pass(n,d){ const e=document.createElement('div'); e.className='ok'; e.textContent='PASS: '+n + (d? ' — '+d : ''); results.appendChild(e); console.log('PASS',n,d||''); }
+    function fail(n,err){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='FAIL: '+n+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; results.appendChild(e); console.error('FAIL',n,err); }
+
+    (function run(){
+      try {
+        // UT7.1: encode/decode RLE roundtrip
+        const mask = new Uint8Array([0,0,1,1,1,0,0,1,0,0]);
+        const width = 5, height = 2;
+        const rle = encodeMaskRLE(mask, width, height);
+        const decoded = decodeMaskRLE(rle, width, height);
+        let ok = decoded.length === mask.length;
+        for (let i=0;i<mask.length;i++) if (decoded[i] !== mask[i]) ok = false;
+        if (ok) pass('UT7.1 RLE encode/decode roundtrip');
+        else throw new Error('RLE mismatch: rle=' + JSON.stringify(rle) + ' decoded=' + Array.from(decoded).join(','));
+
+        // UT7.2: exportProject returns valid manifest with textures/regions/keyframes
+        // create a tiny canvas texture
+        const c = document.createElement('canvas'); c.width = 4; c.height = 2;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'rgb(10,20,30)'; ctx.fillRect(0,0,4,2);
+        const project = {
+          textures: [{ id: 'tex0', width:4, height:2, canvas: c }],
+          regions: [{ id: 'r1', textureId: 'tex0', bbox:{minX:0,minY:0,maxX:3,maxY:1}, centroid:{x:1.5,y:0.5}, pivot:{x:1.5,y:0.5}, mask: new Uint8Array([1,1,1,1,1,1,1,1]), width:4, height:2 }],
+          keyframes: [{ id:'k1', time:0, regionId:'r1', transform:{tx:0,ty:0,scale:1} }]
+        };
+        const manifestStr = exportProject(project, { embedTextures: true });
+        const manifest = JSON.parse(manifestStr);
+        if (manifest.version && Array.isArray(manifest.textures) && Array.isArray(manifest.regions) && Array.isArray(manifest.keyframes)) pass('UT7.2 exportProject manifest schema valid');
+        else throw new Error('Manifest schema invalid: ' + manifestStr);
+
+        // UT7.3: exportPackage returns assets and manifest; maskRLE decodes back to original mask
+        const pkg = exportPackage(project, { embedTextures: true });
+        const m = JSON.parse(pkg.manifest);
+        const regionEntry = m.regions.find(r=>r.id==='r1');
+        if (!regionEntry) throw new Error('region missing in manifest');
+        const decodedMask = decodeMaskRLE(regionEntry.maskRLE, regionEntry.maskWidth, regionEntry.maskHeight);
+        let same = decodedMask.length === project.regions[0].mask.length;
+        for (let i=0;i<decodedMask.length;i++) if (decodedMask[i] !== project.regions[0].mask[i]) same = false;
+        if (same && pkg.assets && pkg.assets['tex0']) pass('UT7.3 exportPackage roundtrip and assets present');
+        else throw new Error('Roundtrip or assets missing');
+
+      } catch (err) { fail('Exporter tests runtime error', err); }
+    })();
+  </script>
+</body>
+</html>

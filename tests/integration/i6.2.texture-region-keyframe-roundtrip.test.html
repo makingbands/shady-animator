@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Integration I6.2 — Texture → Region → Keyframe Roundtrip</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <h2>Integration I6.2 — Texture → Region → Keyframe Roundtrip</h2>
+  <div id="results"></div>
+
+  <script type="module">
+    import { loadTexture } from '../../src/textureLoader.js';
+    import { defineRegion } from '../../src/regionDef.js';
+    import { createPivotStore } from '../../src/pivotManager.js';
+    import { createKeyframeStore } from '../../src/keyframeStore.js';
+    import { createController, computeTransformMatrix, applyTransformToPoint } from '../../src/transformController.js';
+
+    const results = document.getElementById('results');
+    function pass(name, details){ const e=document.createElement('div'); e.className='ok'; e.innerHTML='<strong>PASS:</strong> '+name+(details?('<pre>'+details+'</pre>'): ''); results.appendChild(e); console.log('PASS',name,details||''); }
+    function fail(name, details){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='<strong>FAIL:</strong> '+name+(details?('<pre>'+details+'</pre>'): ''); results.appendChild(e); console.error('FAIL',name,details||''); }
+
+    (async function run(){
+      try {
+        // 1) Create synthetic image (12x6) with a distinct region
+        const w = 12, h = 6;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'rgb(30,30,30)'; ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = 'rgb(180,180,20)'; ctx.fillRect(4,1,4,4); // yellow block
+
+        // 2) Load via loader
+        const blob = await new Promise((res,rej)=> c.toBlob(b=>b?res(b):rej(new Error('toBlob failed')),'image/png'));
+        const loaded = await loadTexture(blob);
+
+        // 3) Define region by sampling inside yellow block
+        const sampleXY = { x: 5, y: 2 };
+        const tolerance = 40;
+        const region = defineRegion(loaded.imageData, sampleXY, tolerance);
+
+        // 4) Pivot store and controller
+        const pstore = createPivotStore();
+        pstore.createRegion('rA', { bbox: region.bbox, centroid: region.centroid });
+        const pivot = pstore.getPivot('rA');
+
+        const controller = createController();
+        controller.createRegion('rA', { pivot, transform: { tx:0,ty:0,scale:1 } });
+
+        // 5) Keyframe store: record three keyframes
+        const kstore = createKeyframeStore();
+        kstore.recordKeyframe(0, 'rA', { tx: 0, ty: 0, scale: 1 });
+        kstore.recordKeyframe(5, 'rA', { tx: 6, ty: 0, scale: 1.5 });
+        kstore.recordKeyframe(10, 'rA', { tx: 12, ty: -4, scale: 2 });
+
+        // 6) Sample interpolated transforms at t=2.5, 5, 7.5
+        const sampleTimes = [2.5, 5, 7.5];
+        const originalSamples = sampleTimes.map(t => ({ t, state: kstore.getInterpolatedState(t) }));
+
+        pass('B1 original interpolation samples captured', JSON.stringify(originalSamples.map(s=>({t:s.t, transform:s.state.rA.transform}))));
+
+        // 7) Serialize both stores into a manifest-like object
+        const manifest = {
+          keyframes: JSON.parse(kstore.serialize()),
+          pivots: JSON.parse(pstore.serialize ? pstore.serialize() : pstore.serialize())
+        };
+
+        // Basic schema check
+        if (!manifest.keyframes || !Array.isArray(manifest.keyframes.frames)) {
+          fail('B2 manifest schema', 'keyframes.frames missing or invalid');
+          return;
+        }
+        if (!manifest.pivots) {
+          fail('B2 manifest schema', 'pivots missing');
+          return;
+        }
+        pass('B2 manifest contains keyframes and pivots', JSON.stringify({ frames: manifest.keyframes.frames.length, pivots: Object.keys(manifest.pivots).length }));
+
+        // 8) Deserialize into fresh stores and compare interpolations
+        const k2 = createKeyframeStore();
+        k2.deserialize(JSON.stringify(manifest.keyframes));
+        const p2 = createPivotStore();
+        p2.deserialize(manifest.pivots);
+
+        const roundtripSamples = sampleTimes.map(t => ({ t, state: k2.getInterpolatedState(t) }));
+        // Compare transforms numerically
+        const eps = 1e-6;
+        for (let i = 0; i < sampleTimes.length; i++) {
+          const orig = originalSamples[i].state.rA.transform;
+          const rt = roundtripSamples[i].state.rA.transform;
+          if (!rt) { fail('Roundtrip missing region at time ' + sampleTimes[i], JSON.stringify(roundtripSamples[i])); return; }
+          const keys = ['tx','ty','scale'];
+          for (const k of keys) {
+            const a = Number(orig[k] || 0);
+            const b = Number(rt[k] || 0);
+            if (Math.abs(a - b) > eps) {
+              fail('Roundtrip interpolation mismatch', 'time:' + sampleTimes[i] + ' key:' + k + ' orig:' + a + ' rt:' + b);
+              return;
+            }
+          }
+        }
+
+        pass('B3 deserialized stores reproduce interpolated transforms', 'All sampled times match');
+
+        pass('Integration I6.2 complete', 'Texture → Region → Keyframe roundtrip validated.');
+
+      } catch (err) {
+        fail('Integration I6.2 runtime error', err && err.stack ? err.stack : String(err));
+      }
+    })();
+  </script>
+</body>
+</html>

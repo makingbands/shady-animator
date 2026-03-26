@@ -1,0 +1,48 @@
+<!-- tests/keyframeStore.test.html -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>KeyframeStore Unit Tests</title>
+  <style>body{font-family:system-ui,Arial;margin:16px} .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}</style>
+</head>
+<body>
+  <h2>KeyframeStore Unit Tests</h2>
+  <div id="results"></div>
+  <script type="module">
+    import { createKeyframeStore } from '../src/keyframeStore.js';
+    const results = document.getElementById('results');
+    function pass(n,d){ const e=document.createElement('div'); e.className='ok'; e.textContent='PASS: '+n + (d? ' — '+d : ''); results.appendChild(e); console.log('PASS',n,d||''); }
+    function fail(n,err){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='FAIL: '+n+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; results.appendChild(e); console.error('FAIL',n,err); }
+
+    (function run(){
+      try {
+        const store = createKeyframeStore();
+        // UT6.1: recordKeyframe stores frame and returns id
+        const id1 = store.recordKeyframe(0, 'r1', { tx:0, ty:0, scale:1 });
+        if (typeof id1 === 'string' && id1.length > 0) pass('UT6.1 recordKeyframe returns id');
+        else throw new Error('Invalid id returned');
+
+        // UT6.2: interpolation between two keyframes
+        const id2 = store.recordKeyframe(10, 'r1', { tx:10, ty:0, scale:2 });
+        const mid = store.getInterpolatedState(5);
+        if (mid.r1 && Math.abs(mid.r1.transform.tx - 5) < 1e-9 && Math.abs(mid.r1.transform.scale - 1.5) < 1e-9) pass('UT6.2 interpolation returns expected mid-state');
+        else throw new Error('Interpolation mismatch: ' + JSON.stringify(mid));
+
+        // UT6.3: playback sequence yields transforms at expected times
+        const t0 = store.getInterpolatedState(0);
+        const t10 = store.getInterpolatedState(10);
+        if (Math.abs(t0.r1.transform.tx - 0) < 1e-9 && Math.abs(t10.r1.transform.tx - 10) < 1e-9) pass('UT6.3 playback yields expected endpoints');
+        else throw new Error('Playback endpoints mismatch');
+
+        // UT6.4: serialize/deserialize roundtrip
+        const json = store.serialize();
+        const store2 = createKeyframeStore();
+        store2.deserialize(json);
+        const list2 = store2.listKeyframes('r1');
+        if (list2.length === 2 && Math.abs(list2[1].transform.tx - 10) < 1e-9) pass('UT6.4 serialize/deserialize roundtrip');
+        else throw new Error('Roundtrip mismatch: ' + JSON.stringify(list2));
+
+      } catch (err) { fail('KeyframeStore tests runtime error', err); }
+    })();
+  </script>
+</body>
+</html>

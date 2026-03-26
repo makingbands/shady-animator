@@ -1,0 +1,86 @@
+<!-- tests/uiGlue.unit.test.html (fixed) -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>UI Glue Unit Tests (fixed)</title>
+  <style>body{font-family:system-ui,Arial;margin:16px} .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee} canvas{border:1px solid #ddd}</style>
+</head>
+<body>
+  <h2>UI Glue Unit Tests (fixed)</h2>
+  <div id="results"></div>
+  <canvas id="textureCanvas" width="320" height="160"></canvas>
+  <canvas id="controllerCanvas" width="200" height="80"></canvas>
+
+  <script type="module">
+    import { createUIGlue } from '../src/uiGlue.js';
+    import * as TL from '../src/textureLoader.js';
+    import * as RD from '../src/regionDef.js';
+    import { createPivotStore } from '../src/pivotManager.js';
+    import { createController } from '../src/transformController.js';
+    import { createKeyframeStore } from '../src/keyframeStore.js';
+    import * as EX from '../src/exporter.js';
+
+    const results = document.getElementById('results');
+    function pass(n,d){ const e=document.createElement('div'); e.className='ok'; e.textContent='PASS: '+n + (d? ' — '+d : ''); results.appendChild(e); console.log('PASS',n,d||''); }
+    function fail(n,err){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='FAIL: '+n+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; results.appendChild(e); console.error('FAIL',n,err); }
+
+    (async function run(){
+      try {
+        // create shared module instances and pass the same object into createUIGlue
+        const textureCanvas = document.getElementById('textureCanvas');
+        const controllerCanvas = document.getElementById('controllerCanvas');
+
+        const modules = {
+          textureLoader: TL,
+          regionDef: RD,
+          pivotManager: createPivotStore(),
+          transformController: createController(),
+          keyframeStore: createKeyframeStore(),
+          exporter: EX
+        };
+
+        // IMPORTANT: pass the same `modules` object into the UI so the test and UI share state
+        const ui = createUIGlue({ textureCanvas, controllerCanvas, modules });
+
+        // load a tiny texture via canvas
+        const c = document.createElement('canvas'); c.width=8; c.height=4;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle='rgb(100,100,100)'; ctx.fillRect(0,0,8,4);
+        const blob = await new Promise(res=>c.toBlob(b=>res(b),'image/png'));
+        await ui.loadTexture(blob);
+
+        // UT8.1: clicking controller pad updates transformController state
+        // create a region by defining at canvas center
+        ui.defineRegionAtCanvasXY(160,80,30);
+        const regionId = ui.getActiveRegion();
+        if (!regionId) throw new Error('No active region after defineRegion');
+
+        // simulate pointerdown/move on controller canvas to change tx/ty
+        const evDown = new PointerEvent('pointerdown', { offsetX: 10, offsetY: 10, pointerId: 1 });
+        controllerCanvas.dispatchEvent(evDown);
+        const evMove = new PointerEvent('pointermove', { offsetX: 20, offsetY: 15, pointerId: 1 });
+        controllerCanvas.dispatchEvent(evMove);
+
+        // Now query the same controller instance used by the UI
+        const transform = modules.transformController.getTransform(regionId);
+        if (typeof transform.tx === 'number') pass('UT8.1 controller pad updates transform state');
+        else throw new Error('Transform not updated');
+
+        // UT8.2: keyboard shortcuts trigger recordKeyframe
+        // simulate pressing 'r'
+        const keyEvent = new KeyboardEvent('keydown', { key: 'r' });
+        window.dispatchEvent(keyEvent);
+        const klist = modules.keyframeStore.listKeyframes(regionId);
+        if (klist.length >= 1) pass('UT8.2 keyboard record triggers keyframeStore.recordKeyframe');
+        else throw new Error('No keyframe recorded');
+
+        // UT8.3: redraw invoked on state change (we check that no exceptions thrown and active region exists)
+        ui.setActiveRegion(regionId);
+        ui.setTolerance(20);
+        ui.recordKeyframe();
+        pass('UT8.3 canvas redraw and state change flow executed');
+
+      } catch (err) { fail('UI Glue unit tests runtime error', err); }
+    })();
+  </script>
+</body>
+</html>

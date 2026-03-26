@@ -1,0 +1,98 @@
+<!-- tests/regionDef.test.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RegionDef Unit Tests</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green}
+    .fail{color:red}
+    pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <h2>RegionDef Unit Tests</h2>
+  <div id="results"></div>
+
+  <script type="module">
+    import { getPixelColor, defineRegion } from '../src/regionDef.js';
+
+    const resultsEl = document.getElementById('results');
+    function pass(name){ const el=document.createElement('div'); el.className='ok'; el.textContent='PASS: '+name; resultsEl.appendChild(el); console.log('PASS:',name); }
+    function fail(name,err){ const el=document.createElement('div'); el.className='fail'; el.innerHTML='FAIL: '+name+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; resultsEl.appendChild(el); console.error('FAIL:',name,err); }
+
+    (async function run(){
+      // UT3.1: sampling function returns exact color for a known pixel
+      try {
+        const c = document.createElement('canvas');
+        c.width = 3; c.height = 3;
+        const ctx = c.getContext('2d');
+        // paint known colors
+        ctx.fillStyle = 'rgb(10,20,30)'; ctx.fillRect(0,0,1,1);
+        ctx.fillStyle = 'rgb(40,50,60)'; ctx.fillRect(1,0,1,1);
+        ctx.fillStyle = 'rgb(70,80,90)'; ctx.fillRect(2,0,1,1);
+        const imageData = ctx.getImageData(0,0,3,3);
+        const col = getPixelColor(imageData, 1, 0);
+        if (col.r === 40 && col.g === 50 && col.b === 60) pass('UT3.1 sampling returns exact color');
+        else throw new Error('Unexpected color: '+JSON.stringify(col));
+      } catch (e) { fail('UT3.1 sampling returns exact color', e); }
+
+      // UT3.2: mask generator marks pixels within tolerance and excludes others
+      try {
+        const c = document.createElement('canvas');
+        c.width = 4; c.height = 1;
+        const ctx = c.getContext('2d');
+        // pixels: [red, red-ish, blue, red]
+        ctx.fillStyle = 'rgb(200,0,0)'; ctx.fillRect(0,0,1,1);
+        ctx.fillStyle = 'rgb(190,10,10)'; ctx.fillRect(1,0,1,1);
+        ctx.fillStyle = 'rgb(0,0,200)'; ctx.fillRect(2,0,1,1);
+        ctx.fillStyle = 'rgb(205,5,5)'; ctx.fillRect(3,0,1,1);
+        const imageData = ctx.getImageData(0,0,4,1);
+        // sample at x=0 (200,0,0), tolerance small should include 0,1,3 but not 2 depending on tol
+        const outLow = defineRegion(imageData, {x:0,y:0}, 5); // very small tolerance
+        // only exact or near-exact should match; expect at least pixel 0 and maybe 3 depending on distance
+        const maskLow = outLow.mask;
+        // compute indices
+        const includedLow = Array.from(maskLow);
+        // with tol=5, only pixel 0 likely included
+        if (includedLow[0] === 1 && includedLow[2] === 0) pass('UT3.2 mask excludes distant colors at low tolerance');
+        else throw new Error('Mask unexpected for low tolerance: '+includedLow.join(','));
+        // now larger tolerance should include 1 and 3
+        const outHigh = defineRegion(imageData, {x:0,y:0}, 30);
+        const includedHigh = Array.from(outHigh.mask);
+        if (includedHigh[0] === 1 && includedHigh[1] === 1 && includedHigh[3] === 1 && includedHigh[2] === 0) pass('UT3.2 mask includes similar colors at higher tolerance');
+        else throw new Error('Mask unexpected for high tolerance: '+includedHigh.join(','));
+      } catch (e) { fail('UT3.2 mask generator behavior', e); }
+
+      // UT3.3: bbox and centroid computed correctly for a synthetic mask
+      try {
+        const c = document.createElement('canvas');
+        c.width = 5; c.height = 5;
+        const ctx = c.getContext('2d');
+        // create a 3x2 block of green at positions x=1..3, y=1..2
+        ctx.fillStyle = 'rgb(0,255,0)';
+        ctx.fillRect(1,1,3,2);
+        // rest black
+        const imageData = ctx.getImageData(0,0,5,5);
+        const out = defineRegion(imageData, {x:1,y:1}, 10);
+        const { bbox, centroid } = out;
+        // bbox should be minX=1,minY=1,maxX=3,maxY=2
+        if (bbox.minX === 1 && bbox.minY === 1 && bbox.maxX === 3 && bbox.maxY === 2) {
+          // centroid: average of all pixels in block: x positions 1,2,3 repeated for y=1,2 => sumX = (1+2+3)*2 = 12; count=6 => x=2
+          // sumY = (1*3 + 2*3) = 9; y = 9/6 = 1.5
+          if (Math.abs(centroid.x - 2) < 1e-6 && Math.abs(centroid.y - 1.5) < 1e-6) {
+            pass('UT3.3 bbox and centroid computed correctly');
+          } else throw new Error('Centroid mismatch: '+JSON.stringify(centroid));
+        } else throw new Error('BBox mismatch: '+JSON.stringify(bbox));
+      } catch (e) { fail('UT3.3 bbox and centroid computed correctly', e); }
+
+      const summary = document.createElement('div');
+      summary.style.marginTop = '16px';
+      summary.textContent = 'RegionDef tests complete.';
+      resultsEl.appendChild(summary);
+    })();
+  </script>
+</body>
+</html>

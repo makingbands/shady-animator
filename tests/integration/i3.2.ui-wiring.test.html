@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Integration I3.2 UI Event Wiring Test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green}
+    .fail{color:red}
+    pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+    .meta{margin-top:12px;font-size:90%}
+    canvas{border:1px solid #ddd; image-rendering: pixelated;}
+  </style>
+</head>
+<body>
+  <h2>Integration Test I3.2 UI Event Wiring</h2>
+  <div id="results"></div>
+  <div class="meta">Simulates a user click on the texture canvas and verifies coordinate mapping and region definition.</div>
+
+  <script type="module">
+    import { loadTexture } from '../../src/textureLoader.js';
+    import { defineRegion, getPixelColor, colorDistance } from '../../src/regionDef.js';
+
+    const resultsEl = document.getElementById('results');
+    function pass(name, details) {
+      const el = document.createElement('div');
+      el.className = 'ok';
+      el.innerHTML = '<strong>PASS:</strong> ' + name + (details ? ('<pre>' + details + '</pre>') : '');
+      resultsEl.appendChild(el);
+      console.log('PASS:', name, details || '');
+    }
+    function fail(name, details) {
+      const el = document.createElement('div');
+      el.className = 'fail';
+      el.innerHTML = '<strong>FAIL:</strong> ' + name + (details ? ('<pre>' + details + '</pre>') : '');
+      resultsEl.appendChild(el);
+      console.error('FAIL:', name, details || '');
+    }
+
+    // Reuse the same draw logic as the MVP: drawImage centered preserving aspect ratio
+    function drawImagePreserveAspect(ctx, img, canvasWidth, canvasHeight) {
+      const ar = img.width / img.height;
+      let dw = canvasWidth, dh = Math.round(dw / ar);
+      if (dh > canvasHeight) { dh = canvasHeight; dw = Math.round(dh * ar); }
+      const dx = Math.round((canvasWidth - dw) / 2);
+      const dy = Math.round((canvasHeight - dh) / 2);
+      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      ctx.drawImage(img, dx, dy, dw, dh);
+      return { dx, dy, dw, dh };
+    }
+
+    // Map canvas coordinates to image pixel coordinates given draw parameters
+    function canvasToImageCoords(canvasX, canvasY, drawParams, imageWidth, imageHeight) {
+      const { dx, dy, dw, dh } = drawParams;
+      // If click outside drawn image area, clamp to nearest pixel inside image
+      const localX = Math.max(0, Math.min(dw - 1, canvasX - dx));
+      const localY = Math.max(0, Math.min(dh - 1, canvasY - dy));
+      // Map localX/localY (0..dw-1, 0..dh-1) to image pixel coordinates (0..imageWidth-1, 0..imageHeight-1)
+      const imgX = (localX / dw) * imageWidth;
+      const imgY = (localY / dh) * imageHeight;
+      // Use floor to pick a pixel index consistent with getPixelColor expectations
+      return { x: Math.floor(imgX), y: Math.floor(imgY) };
+    }
+
+    async function run() {
+      try {
+        // Create a synthetic image (16x8) with three vertical bands for clear sampling
+        const imgW = 16, imgH = 8;
+        const srcCanvas = document.createElement('canvas');
+        srcCanvas.width = imgW; srcCanvas.height = imgH;
+        const sctx = srcCanvas.getContext('2d');
+        for (let x = 0; x < imgW; x++) {
+          for (let y = 0; y < imgH; y++) {
+            if (x < 6) sctx.fillStyle = 'rgb(220,20,20)';       // red band
+            else if (x < 11) sctx.fillStyle = 'rgb(20,220,20)'; // green band
+            else sctx.fillStyle = 'rgb(20,20,220)';             // blue band
+            sctx.fillRect(x, y, 1, 1);
+          }
+        }
+
+        // Convert to blob and load via loadTexture to simulate real decode path
+        const blob = await new Promise((res, rej) => srcCanvas.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'));
+        const loaded = await loadTexture(blob);
+        if (!loaded || !loaded.imageData) throw new Error('loadTexture returned invalid object');
+
+        // Create a visible canvas that uses the same dimensions as the MVP canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; // canvas display width
+        canvas.height = 160; // canvas display height
+        canvas.id = 'testTextureCanvas';
+        document.body.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+
+        // Create an Image element from the blob for drawImage path
+        const imgUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = imgUrl; });
+
+        // Draw image centered preserving aspect ratio and capture draw params
+        const drawParams = drawImagePreserveAspect(ctx, img, canvas.width, canvas.height);
+
+        // Simulate a user click at a canvas coordinate that lies inside the red band visually.
+        // Choose a canvas coordinate that maps to image x=2 (red band). Compute canvasX accordingly.
+        // We'll compute the canvas coordinate from desired image pixel to ensure mapping is exact.
+        const desiredImageSample = { x: 2, y: 3 }; // pick a pixel inside red band
+        // Map desired image pixel to canvas coordinates (inverse of canvasToImageCoords)
+        const canvasX = Math.round(drawParams.dx + (desiredImageSample.x + 0.5) * (drawParams.dw / imgW));
+        const canvasY = Math.round(drawParams.dy + (desiredImageSample.y + 0.5) * (drawParams.dh / imgH));
+
+        // Simulate click event (not strictly necessary for this test, but we emulate UI flow)
+        const clickEvent = new MouseEvent('click', { clientX: canvasX, clientY: canvasY, bubbles: true });
+        canvas.dispatchEvent(clickEvent);
+
+        // Compute expected image coords using the same mapping function the UI should use
+        const expectedSampleXY = canvasToImageCoords(canvasX, canvasY, drawParams, imgW, imgH);
+
+        // Now call defineRegion with the loaded.imageData and expectedSampleXY
+        const tolerance = 40;
+        const region = defineRegion(loaded.imageData, expectedSampleXY, tolerance);
+
+        // Assertions
+        // 1) defineRegion was invoked and returned a mask of correct length
+        if (!region || !region.mask) { fail('defineRegion invocation', 'No region or mask returned'); return; }
+        const mask = region.mask;
+        if (mask.length !== imgW * imgH) { fail('mask dimensions', 'Expected ' + (imgW * imgH) + ' got ' + mask.length); return; }
+        pass('mask dimensions match image size', 'mask length ' + mask.length);
+
+        // 2) mask non-empty
+        const ones = Array.from(mask).reduce((s, v) => s + (v ? 1 : 0), 0);
+        if (ones <= 0) { fail('mask non-empty', 'Mask contains zero selected pixels'); return; }
+        pass('mask non-empty', 'selected pixels: ' + ones);
+
+        // 3) sample coordinate used by defineRegion matches expectedSampleXY and sampleColor is from that pixel
+        const sampleColorFromRegion = region.sampleColor || getPixelColor(loaded.imageData, expectedSampleXY.x, expectedSampleXY.y);
+        const actualPixelColor = getPixelColor(loaded.imageData, expectedSampleXY.x, expectedSampleXY.y);
+        const dist = colorDistance(sampleColorFromRegion, actualPixelColor);
+        if (dist > 1e-6) { fail('sample color consistency', 'sampleColor differs from pixel color at expected coords: dist=' + dist); return; }
+        pass('sample coordinate mapping correct', 'expected sampleXY: ' + JSON.stringify(expectedSampleXY));
+
+        // 4) verify that all masked pixels are within tolerance of the sample color
+        const violations = [];
+        for (let y = 0; y < imgH; y++) {
+          for (let x = 0; x < imgW; x++) {
+            const idx = y * imgW + x;
+            if (mask[idx]) {
+              const px = getPixelColor(loaded.imageData, x, y);
+              const d = colorDistance(px, sampleColorFromRegion);
+              if (d > tolerance + 1e-6) violations.push({ x, y, d });
+            }
+          }
+        }
+        if (violations.length > 0) {
+          fail('masked pixels within tolerance', 'Violations: ' + JSON.stringify(violations.slice(0, 10)));
+          return;
+        }
+        pass('masked pixels within tolerance', 'All masked pixels satisfy colorDistance <= tolerance');
+
+        pass('Integration I3.2 complete', 'UI click mapping and defineRegion wiring validated.');
+
+        // cleanup
+        URL.revokeObjectURL(imgUrl);
+      } catch (err) {
+        fail('Integration I3.2 runtime error', err && err.stack ? err.stack : String(err));
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

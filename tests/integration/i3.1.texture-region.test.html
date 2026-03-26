@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Integration I3.1 Test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green}
+    .fail{color:red}
+    pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+    .meta{margin-top:12px;font-size:90%}
+  </style>
+</head>
+<body>
+  <h2>Integration Test I3.1 — Texture loader ↔ Region definition</h2>
+  <div id="results"></div>
+  <div class="meta">This test uses a synthetic canvas image to avoid network/CORS issues.</div>
+
+  <script type="module">
+    import { loadTexture } from '../../src/textureLoader.js';
+    import { defineRegion, colorDistance, getPixelColor } from '../../src/regionDef.js';
+
+    const resultsEl = document.getElementById('results');
+    function pass(name, details) {
+      const el = document.createElement('div');
+      el.className = 'ok';
+      el.innerHTML = '<strong>PASS:</strong> ' + name + (details ? ('<pre>' + details + '</pre>') : '');
+      resultsEl.appendChild(el);
+      console.log('PASS:', name, details || '');
+    }
+    function fail(name, details) {
+      const el = document.createElement('div');
+      el.className = 'fail';
+      el.innerHTML = '<strong>FAIL:</strong> ' + name + (details ? ('<pre>' + details + '</pre>') : '');
+      resultsEl.appendChild(el);
+      console.error('FAIL:', name, details || '');
+    }
+
+    async function runIntegrationTest() {
+      try {
+        // 1) Create synthetic image: 10x4 pixels with three color bands
+        const w = 10, h = 4;
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+
+        // Fill columns 0..3 with red-ish, 4..6 with green-ish, 7..9 with blue-ish
+        for (let x = 0; x < w; x++) {
+          for (let y = 0; y < h; y++) {
+            if (x < 4) ctx.fillStyle = 'rgb(200,10,10)';       // red band
+            else if (x < 7) ctx.fillStyle = 'rgb(10,200,10)';  // green band
+            else ctx.fillStyle = 'rgb(10,10,200)';             // blue band
+            ctx.fillRect(x, y, 1, 1);
+          }
+        }
+
+        // 2) Convert canvas to blob (PNG)
+        const blob = await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'));
+
+        // 3) Use loadTexture to decode into imageData
+        const loaded = await loadTexture(blob);
+        if (!loaded || !loaded.imageData) throw new Error('loadTexture returned invalid object');
+
+        // 4) Choose a sample point inside the red band (x=1,y=1)
+        const sampleXY = { x: 1, y: 1 };
+        const tolerance = 30; // moderate tolerance
+
+        // 5) Call defineRegion
+        const region = defineRegion(loaded.imageData, sampleXY, tolerance);
+        if (!region || !region.mask) throw new Error('defineRegion returned invalid region');
+
+        // Assertion A1: mask non-empty
+        const maskArr = region.mask;
+        const totalOnes = Array.from(maskArr).reduce((s, v) => s + (v ? 1 : 0), 0);
+        if (totalOnes <= 0) {
+          fail('A1 mask non-empty', 'Mask contains zero selected pixels');
+          return;
+        } else {
+          pass('A1 mask non-empty', 'Selected pixels count: ' + totalOnes);
+        }
+
+        // Assertion A2: every masked pixel is within tolerance of sample color
+        const sampleColor = region.sampleColor || getPixelColor(loaded.imageData, sampleXY.x, sampleXY.y);
+        const width = loaded.width, height = loaded.height;
+        const violations = [];
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (maskArr[idx]) {
+              const px = getPixelColor(loaded.imageData, x, y);
+              const dist = colorDistance(px, sampleColor);
+              if (dist > tolerance + 1e-6) {
+                violations.push({ x, y, dist });
+              }
+            }
+          }
+        }
+
+        if (violations.length === 0) {
+          pass('A2 masked pixels within tolerance', 'All masked pixels satisfy colorDistance <= tolerance');
+        } else {
+          fail('A2 masked pixels within tolerance', 'Violations: ' + JSON.stringify(violations.slice(0,10)));
+          return;
+        }
+
+        // Additional sanity checks: bbox inside image bounds
+        const bbox = region.bbox;
+        if (bbox.minX < 0 || bbox.minY < 0 || bbox.maxX >= width || bbox.maxY >= height) {
+          fail('Sanity bbox bounds', 'bbox out of image bounds: ' + JSON.stringify(bbox));
+          return;
+        } else {
+          pass('Sanity bbox bounds', JSON.stringify(bbox));
+        }
+
+        pass('Integration I3.1 complete', 'Texture loader and region definition interoperate as expected.');
+      } catch (err) {
+        fail('Integration I3.1 runtime error', err && err.stack ? err.stack : String(err));
+      }
+    }
+
+    runIntegrationTest();
+  </script>
+</body>
+</html>

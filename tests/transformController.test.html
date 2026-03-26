@@ -1,0 +1,76 @@
+<!-- tests/transformController.test.html -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>TransformController Unit Tests</title>
+  <style>body{font-family:system-ui,Arial;margin:16px} .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}</style>
+</head>
+<body>
+  <h2>TransformController Unit Tests</h2>
+  <div id="results"></div>
+  <script type="module">
+    import { computeTransformMatrix, applyTransformToPoint, transformRegionGeometry, createController } from '../src/transformController.js';
+    const results = document.getElementById('results');
+    function pass(n,d){ const e=document.createElement('div'); e.className='ok'; e.textContent='PASS: '+n + (d? ' — '+d : ''); results.appendChild(e); console.log('PASS',n,d||''); }
+    function fail(n,err){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='FAIL: '+n+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; results.appendChild(e); console.error('FAIL',n,err); }
+
+    (function run(){
+      try {
+        // UT5.1: translation moves centroid by tx,ty
+        const transform = { tx: 5, ty: -3, scale: 1 };
+        const pivot = { x: 0, y: 0 };
+        const mat = computeTransformMatrix(transform, pivot);
+        const pt = { x: 10, y: 10 };
+        const tpt = applyTransformToPoint(pt, mat);
+        if (Math.abs(tpt.x - (pt.x + 5)) < 1e-9 && Math.abs(tpt.y - (pt.y - 3)) < 1e-9) pass('UT5.1 translation moves point by tx/ty');
+        else throw new Error('Translation mismatch: ' + JSON.stringify(tpt));
+
+        // UT5.2: scale around pivot scales distances
+        const transform2 = { tx: 0, ty: 0, scale: 2 };
+        const pivot2 = { x: 5, y: 5 };
+        const mat2 = computeTransformMatrix(transform2, pivot2);
+        const pt2 = { x: 7, y: 5 }; // 2 units to the right of pivot
+        const tpt2 = applyTransformToPoint(pt2, mat2);
+        // expected: pivot + (2 * (pt - pivot)) => x = 5 + 2*(2) = 9
+        if (Math.abs(tpt2.x - 9) < 1e-9 && Math.abs(tpt2.y - 5) < 1e-9) pass('UT5.2 scale around pivot scales distances correctly');
+        else throw new Error('Scale mismatch: ' + JSON.stringify(tpt2));
+
+        // UT5.3: composition equals sequential application
+        const A = computeTransformMatrix({ tx: 3, ty: 0, scale: 1 }, { x:0,y:0 });
+        const B = computeTransformMatrix({ tx: 0, ty: 0, scale: 2 }, { x:0,y:0 });
+        // apply B then A to point
+        const p = { x: 1, y: 1 };
+        const pAfterB = applyTransformToPoint(p, B);
+        const pAfterBA = applyTransformToPoint(pAfterB, A);
+        // compose matrices A * B
+        // reuse composeMatrices by importing if needed; here compute via controller helper by recomputing
+        // We'll compute composed matrix by applying transforms to basis vectors
+        const composed = (function(){
+          // multiply A * B using matrix multiplication helper inside module by reusing computeTransformMatrix with identity pivot
+          // Simpler: apply B then A to basis points and reconstruct linear transform; for test we compare result points
+          return null;
+        })();
+        // Instead compare point results directly
+        const matB = B;
+        const matA = A;
+        const pSeq = pAfterBA;
+        // Now compute A*B matrix by applying to p directly using multiplyMatrices via module internals is not exported.
+        // Instead, verify that computeTransformMatrix for combined transform equals sequential numeric result for this simple case:
+        const combinedTransform = { tx: 3, ty: 0, scale: 2 }; // scale then translate around origin equals these params
+        const matCombined = computeTransformMatrix(combinedTransform, { x:0,y:0 });
+        const pCombined = applyTransformToPoint(p, matCombined);
+        if (Math.abs(pCombined.x - pSeq.x) < 1e-9 && Math.abs(pCombined.y - pSeq.y) < 1e-9) pass('UT5.3 composition equals sequential application for origin-centered ops');
+        else throw new Error('Composition mismatch: seq=' + JSON.stringify(pSeq) + ' combined=' + JSON.stringify(pCombined));
+
+        // UT5.4: controller state updates
+        const controller = createController();
+        controller.createRegion('r1', { transform: { tx:0,ty:0,scale:1 }, pivot: { x:2,y:2 } });
+        controller.setTransform('r1', { tx: 4, ty: -2, scale: 1.5 });
+        const t = controller.getTransform('r1');
+        if (Math.abs(t.tx - 4) < 1e-9 && Math.abs(t.scale - 1.5) < 1e-9) pass('UT5.4 controller state updates on setTransform');
+        else throw new Error('Controller state mismatch: ' + JSON.stringify(t));
+
+      } catch (err) { fail('TransformController tests runtime error', err); }
+    })();
+  </script>
+</body>
+</html>

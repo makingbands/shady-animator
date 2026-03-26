@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Integration I6.1 — Region Pivot + Transform + Keyframes</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui,Arial;margin:16px;background:#fff;color:#000}
+    .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}
+  </style>
+</head>
+<body>
+  <h2>Integration I6.1 — Region Pivot + Transform + Keyframes</h2>
+  <div id="results"></div>
+
+  <script type="module">
+    import { loadTexture } from '../../src/textureLoader.js';
+    import { defineRegion, getPixelColor, colorDistance } from '../../src/regionDef.js';
+    import { createPivotStore } from '../../src/pivotManager.js';
+    import { createController, computeTransformMatrix, applyTransformToPoint } from '../../src/transformController.js';
+    import { createKeyframeStore } from '../../src/keyframeStore.js';
+
+    const results = document.getElementById('results');
+    function pass(name, details){ const e=document.createElement('div'); e.className='ok'; e.innerHTML='<strong>PASS:</strong> '+name+(details?('<pre>'+details+'</pre>'): ''); results.appendChild(e); console.log('PASS',name,details||''); }
+    function fail(name, details){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='<strong>FAIL:</strong> '+name+(details?('<pre>'+details+'</pre>'): ''); results.appendChild(e); console.error('FAIL',name,details||''); }
+
+    (async function run(){
+      try {
+        // 1) Create synthetic image (8x8) with a single colored block for deterministic region
+        const w = 8, h = 8;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        // Fill entire canvas with gray, then a 3x3 red block at x=2..4,y=2..4
+        ctx.fillStyle = 'rgb(50,50,50)'; ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = 'rgb(200,20,20)'; ctx.fillRect(2,2,3,3);
+
+        // 2) Load via textureLoader to get imageData
+        const blob = await new Promise((res,rej)=> c.toBlob(b=>b?res(b):rej(new Error('toBlob failed')),'image/png'));
+        const loaded = await loadTexture(blob);
+        if (!loaded || !loaded.imageData) throw new Error('loadTexture failed');
+
+        // 3) Define region by sampling inside the red block
+        const sampleXY = { x: 3, y: 3 };
+        const tolerance = 30;
+        const region = defineRegion(loaded.imageData, sampleXY, tolerance);
+        if (!region || !region.mask) throw new Error('defineRegion failed');
+
+        // 4) Create pivot store and register region metadata (centroid, bbox)
+        const pivotStore = createPivotStore();
+        pivotStore.createRegion('r1', { bbox: region.bbox, centroid: region.centroid });
+        const pivot = pivotStore.getPivot('r1');
+
+        // 5) Create transform controller and initialize region with pivot
+        const controller = createController();
+        controller.createRegion('r1', { pivot, transform: { tx: 0, ty: 0, scale: 1 } });
+
+        // 6) Create keyframe store and record two keyframes at t=0 and t=10
+        const kstore = createKeyframeStore();
+        // keyframe A: identity
+        kstore.recordKeyframe(0, 'r1', { tx: 0, ty: 0, scale: 1 });
+        // keyframe B: translate + scale
+        kstore.recordKeyframe(10, 'r1', { tx: 4, ty: -2, scale: 2 });
+
+        // 7) Request interpolated state at t=5 (midpoint)
+        const midTime = 5;
+        const interp = kstore.getInterpolatedState(midTime);
+        if (!interp.r1) throw new Error('No interpolated transform for r1');
+        const interpTransform = interp.r1.transform;
+
+        pass('A1 interpolation produced transform', JSON.stringify(interpTransform));
+
+        // 8) Compute matrix for interpolated transform around pivot and apply to centroid
+        const matrix = computeTransformMatrix(interpTransform, pivot);
+        const transformedCentroidByMatrix = applyTransformToPoint(region.centroid, matrix);
+
+        // 9) Compute expected centroid by linearly applying transforms to centroid:
+        // Apply interpolation directly: compute centroid after applying interpolated transform (same as matrix result)
+        // For verification, compute centroid by sequentially interpolating tx/ty/scale and applying formula:
+        const expectedTx = interpTransform.tx;
+        const expectedTy = interpTransform.ty;
+        const expectedScale = interpTransform.scale;
+        // manual application: translate to pivot, scale, translate back, then translate by tx/ty
+        const dx = region.centroid.x - pivot.x;
+        const dy = region.centroid.y - pivot.y;
+        const ex = pivot.x + expectedScale * dx + expectedTx;
+        const ey = pivot.y + expectedScale * dy + expectedTy;
+
+        const eps = 1e-6;
+        if (Math.abs(transformedCentroidByMatrix.x - ex) < eps && Math.abs(transformedCentroidByMatrix.y - ey) < eps) {
+          pass('A2 interpolated centroid matches matrix application', 'centroid: ' + JSON.stringify(transformedCentroidByMatrix));
+        } else {
+          fail('A2 centroid mismatch', 'matrix:' + JSON.stringify(transformedCentroidByMatrix) + '\nexpected:' + JSON.stringify({x:ex,y:ey}));
+          return;
+        }
+
+        // 10) Serialize keyframes and pivot store, then deserialize into fresh stores and verify same interpolation
+        const kjson = kstore.serialize();
+        const pjson = pivotStore.serialize ? pivotStore.serialize() : pivotStore.serialize(); // pivotStore.serialize exists
+        const k2 = createKeyframeStore();
+        k2.deserialize(kjson);
+        const p2 = createPivotStore();
+        p2.deserialize(pjson);
+
+        const pivot2 = p2.getPivot('r1');
+        const interp2 = k2.getInterpolatedState(midTime);
+        if (!interp2.r1) throw new Error('Deserialized store missing region r1');
+        const matrix2 = computeTransformMatrix(interp2.r1.transform, pivot2);
+        const transformedCentroid2 = applyTransformToPoint(region.centroid, matrix2);
+
+        if (Math.abs(transformedCentroid2.x - transformedCentroidByMatrix.x) < eps && Math.abs(transformedCentroid2.y - transformedCentroidByMatrix.y) < eps) {
+          pass('A3 serialize/deserialize roundtrip reproduces interpolated centroid', JSON.stringify(transformedCentroid2));
+        } else {
+          fail('A3 roundtrip mismatch', 'before:' + JSON.stringify(transformedCentroidByMatrix) + '\nafter:' + JSON.stringify(transformedCentroid2));
+          return;
+        }
+
+        pass('Integration I6.1 complete', 'Region pivot + transform + keyframes interoperate as expected.');
+      } catch (err) {
+        fail('Integration I6.1 runtime error', err && err.stack ? err.stack : String(err));
+      }
+    })();
+  </script>
+</body>
+</html>

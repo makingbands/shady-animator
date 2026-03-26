@@ -1,0 +1,49 @@
+<!-- tests/pivotManager.test.html -->
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><title>PivotManager Unit Tests</title>
+  <style>body{font-family:system-ui,Arial;margin:16px} .ok{color:green} .fail{color:red} pre{background:#f7f7f7;padding:8px;border:1px solid #eee}</style>
+</head>
+<body>
+  <h2>PivotManager Unit Tests</h2>
+  <div id="results"></div>
+  <script type="module">
+    import { createPivotStore } from '../src/pivotManager.js';
+    const results = document.getElementById('results');
+    function pass(n){ const e=document.createElement('div'); e.className='ok'; e.textContent='PASS: '+n; results.appendChild(e); console.log('PASS',n); }
+    function fail(n,err){ const e=document.createElement('div'); e.className='fail'; e.innerHTML='FAIL: '+n+'<pre>'+(err && err.stack?err.stack:String(err))+'</pre>'; results.appendChild(e); console.error('FAIL',n,err); }
+
+    (function run(){
+      try {
+        const store = createPivotStore();
+        // UT4.1 default pivot equals centroid when none set
+        store.createRegion('r1', { bbox:{minX:0,minY:0,maxX:4,maxY:4}, centroid:{x:2,y:2} });
+        const p1 = store.getPivot('r1');
+        if (p1.x === 2 && p1.y === 2) pass('UT4.1 default pivot equals centroid');
+        else throw new Error('default pivot mismatch: '+JSON.stringify(p1));
+
+        // UT4.2 setPivot updates metadata and persists in-memory
+        store.setPivot('r1', 1.5, 3.25);
+        const p2 = store.getPivot('r1');
+        if (Math.abs(p2.x - 1.5) < 1e-9 && Math.abs(p2.y - 3.25) < 1e-9) pass('UT4.2 setPivot updates region metadata');
+        else throw new Error('setPivot did not persist: '+JSON.stringify(p2));
+
+        // UT4.3 pivot constrained to bbox when requested
+        store.setPivot('r1', -10, 100, { constrainToBBox: true });
+        const p3 = store.getPivot('r1');
+        if (p3.x === 0 && p3.y === 4) pass('UT4.3 pivot constrained to bbox');
+        else throw new Error('constrainToBBox failed: '+JSON.stringify(p3));
+
+        // serialize/deserialize roundtrip
+        const json = store.serialize();
+        const store2 = createPivotStore();
+        store2.deserialize(json);
+        const p4 = store2.getPivot('r1');
+        if (p4.x === p3.x && p4.y === p3.y) pass('UT4.4 serialize/deserialize roundtrip');
+        else throw new Error('roundtrip mismatch: '+JSON.stringify(p4));
+
+      } catch (err) { fail('PivotManager tests runtime error', err); }
+    })();
+  </script>
+</body>
+</html>

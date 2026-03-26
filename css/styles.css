@@ -1,0 +1,52 @@
+/* csss/styles.css - minimal white-void layout */
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #ffffff;
+  color: #000000;
+  font-family: system-ui, "Segoe UI", Arial, sans-serif;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.top {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bottom {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid #eee;
+}
+
+canvas {
+  background: transparent;
+  display: block;
+}
+
+#textureCanvas {
+  width: 800px;
+  height: 480px;
+  border: 1px solid #ddd;
+}
+
+#controllerCanvas {
+  width: 400px;
+  height: 160px;
+  border: 1px solid #ddd;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
