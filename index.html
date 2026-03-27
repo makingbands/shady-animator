@@ -1,204 +1,40 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Shady Animator MVP</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link href="./css/styles.css" rel="stylesheet" type="text/css" />
+  <meta charset="UTF-8" />
+  <title>Shady Animator</title>
+  <!-- Consolidated stylesheet -->
+  <link rel="stylesheet" href="./css/styles.css" />
 </head>
+
 <body>
-  <div class="container">
-    <div class="top" role="main" aria-label="Texture view">
-      <canvas id="textureCanvas" width="800" height="480" aria-label="Texture canvas"></canvas>
-    </div>
+  <div id="app">
 
-    <div class="bottom" role="region" aria-label="Controller pad and controls">
-      <div class="controls" aria-hidden="false">
-        <canvas id="controllerCanvas" width="400" height="160" aria-label="Controller pad"></canvas>
+    <!-- Primary working canvas -->
+    <canvas
+      id="main"
+      width="800"
+      height="600"
+      data-action="RegionSelector"
+      data-source="#main"
+    ></canvas>
 
-        <div class="control-panel" style="display:flex;flex-direction:column;gap:8px;">
-          <div>
-            <button id="loadBtn" type="button">Load Texture</button>
-            <input id="fileInput" type="file" accept="image/*" style="display:none" aria-hidden="true" />
-          </div>
+    <!-- Secondary canvas (preview, transforms, future steps) -->
+    <canvas
+      id="preview"
+      width="800"
+      height="200"
+    ></canvas>
 
-          <div>
-            <label for="toleranceRange">Tolerance</label>
-            <input id="toleranceRange" type="range" min="0" max="200" value="30" />
-            <span id="toleranceValue">30</span>
-          </div>
-
-          <div style="display:flex;gap:8px;">
-            <button id="recordBtn" type="button">Record Keyframe</button>
-            <button id="exportBtn" type="button">Export Project</button>
-            <button id="playBtn" type="button">Play</button>
-          </div>
-
-          <div>
-            <label for="activeRegion">Active Region</label>
-            <select id="activeRegion" aria-label="Active region selector">
-              <option value="">— none —</option>
-            </select>
-          </div>
-
-          <div id="status" aria-live="polite" style="font-size:90%;color:#333"></div>
-        </div>
-      </div>
-    </div>
   </div>
 
+  <!-- UI Loader -->
   <script type="module">
-    import * as textureLoader from './src/textureLoader.js';
-    import * as regionDef from './src/regionDef.js';
-    import { createPivotStore } from './src/pivotManager.js';
-    import { createController } from './src/transformController.js';
-    import { createKeyframeStore } from './src/keyframeStore.js';
-    import * as exporter from './src/exporter.js';
-    import { createUIGlue } from './src/uiGlue.js';
-
-    // Shared module instances
-    const modules = {
-      textureLoader,
-      regionDef,
-      pivotManager: createPivotStore(),
-      transformController: createController(),
-      keyframeStore: createKeyframeStore(),
-      exporter
-    };
-
-    // UI elements
-    const textureCanvas = document.getElementById('textureCanvas');
-    const controllerCanvas = document.getElementById('controllerCanvas');
-    const loadBtn = document.getElementById('loadBtn');
-    const fileInput = document.getElementById('fileInput');
-    const toleranceRange = document.getElementById('toleranceRange');
-    const toleranceValue = document.getElementById('toleranceValue');
-    const recordBtn = document.getElementById('recordBtn');
-    const exportBtn = document.getElementById('exportBtn');
-    const playBtn = document.getElementById('playBtn');
-    const activeRegionSelect = document.getElementById('activeRegion');
-    const statusEl = document.getElementById('status');
-
-    // Create UI glue
-    const ui = createUIGlue({ textureCanvas, controllerCanvas, modules });
-
-    // Initialize UI
-    ui.init();
-
-    // Helpers
-    function setStatus(msg) {
-      statusEl.textContent = msg;
-    }
-
-    function refreshRegionList() {
-      // rebuild selector from ui internal state
-      const current = ui.getActiveRegion();
-      activeRegionSelect.innerHTML = '<option value="">— none —</option>';
-      // we can read pivot store by serializing or using getRegion if available
-      try {
-        // pivotManager stores region metadata; iterate via serialized JSON keys
-        const serialized = modules.pivotManager.serialize ? modules.pivotManager.serialize() : '{}';
-        const obj = JSON.parse(serialized || '{}');
-        for (const id of Object.keys(obj)) {
-          const opt = document.createElement('option');
-          opt.value = id;
-          opt.textContent = id;
-          if (id === current) opt.selected = true;
-          activeRegionSelect.appendChild(opt);
-        }
-      } catch (e) {
-        // fallback: keep only current
-        if (current) {
-          const opt = document.createElement('option');
-          opt.value = current;
-          opt.textContent = current;
-          opt.selected = true;
-          activeRegionSelect.appendChild(opt);
-        }
-      }
-    }
-
-    // Wire controls
-    loadBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', async (ev) => {
-      const f = ev.target.files && ev.target.files[0];
-      if (!f) return;
-      try {
-        setStatus('Loading texture...');
-        await ui.loadTexture(f);
-        setStatus('Texture loaded');
-        refreshRegionList();
-      } catch (err) {
-        setStatus('Texture load failed: ' + (err && err.error ? err.error : String(err)));
-      }
+    import { loadUI } from './src/ui/ui-loader.js';
+    window.addEventListener('DOMContentLoaded', () => {
+      loadUI();
     });
-
-    // Allow drag-and-drop onto texture canvas
-    textureCanvas.addEventListener('dragover', (e) => e.preventDefault());
-    textureCanvas.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (!f) return;
-      try {
-        setStatus('Loading texture...');
-        await ui.loadTexture(f);
-        setStatus('Texture loaded');
-        refreshRegionList();
-      } catch (err) {
-        setStatus('Texture load failed: ' + (err && err.error ? err.error : String(err)));
-      }
-    });
-
-    // Tolerance control
-    toleranceRange.addEventListener('input', (e) => {
-      const v = Number(e.target.value);
-      toleranceValue.textContent = String(v);
-      ui.setTolerance(v);
-    });
-
-    // Record keyframe
-    recordBtn.addEventListener('click', () => {
-      try {
-        const id = ui.recordKeyframe();
-        setStatus('Recorded keyframe ' + id);
-      } catch (err) {
-        setStatus('Record failed: ' + String(err));
-      }
-    });
-
-    // Export
-    exportBtn.addEventListener('click', () => {
-      try {
-        const manifest = ui.exportProject({ embedTextures: true });
-        // present manifest as downloadable blob via data URL is intentionally omitted here
-        setStatus('Export prepared (manifest JSON string length ' + manifest.length + ')');
-      } catch (err) {
-        setStatus('Export failed: ' + (err && err.error ? err.error : String(err)));
-      }
-    });
-
-    // Play toggle
-    playBtn.addEventListener('click', () => {
-      const playing = ui.togglePlayback();
-      playBtn.textContent = playing ? 'Pause' : 'Play';
-      setStatus(playing ? 'Playback started' : 'Playback paused');
-    });
-
-    // Active region selector
-    activeRegionSelect.addEventListener('change', (e) => {
-      const id = e.target.value;
-      ui.setActiveRegion(id || null);
-      setStatus(id ? ('Active region ' + id) : 'No active region');
-    });
-
-    // Keep region list in sync when transforms or pivots change
-    modules.transformController.onChange(() => refreshRegionList());
-
-    // Expose ui for debugging on window
-    window.ShadyAnimator = { ui, modules };
-
-    // Initial status
-    setStatus('Ready');
   </script>
+
 </body>
 </html>

@@ -1,0 +1,10 @@
+/**
+ * resource: src/ui/region-selector.css
+ * goal: Provide cursor feedback for region selection
+ * channel: ui-style
+ * handoff: epoch.mm.shady-animator.v1.1.step10.region-selector-css
+ */
+
+canvas {
+  cursor: crosshair;
+}
