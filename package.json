@@ -1,0 +1,46 @@
+{
+  "name": "shady-animator",
+  "version": "1.1.0-rc",
+  "description": "Shady Animator — lightweight region/pivot/transform/keyframe MVP",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": "jD+Ξ",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/makingbands/shady-animator.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "npx http-server -p 8080",
+    "dev": "npm run start",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{js,json,html,css,ts}\"",
+    "format:check": "prettier --check \"**/*.{js,json,html,css,ts}\"",
+    "test:headless": "playwright test --reporter=list",
+    "test:ci": "node scripts/ci-run-tests.js",
+    "ci": "npm ci && npx playwright install --with-deps && npm run test:ci"
+  },
+  "files": [
+    "src/",
+    "tests/",
+    "scripts/",
+    "index.html",
+    "docs/"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^25.5.0",
+    "eslint": "^8.40.0",
+    "http-server": "^14.1.1",
+    "nyc": "^15.1.0",
+    "prettier": "^2.8.0"
+  },
+  "keywords": [
+    "raster",
+    "animation",
+    "shaders"
+  ]
+}
