@@ -1,36 +1,105 @@
-/**
- * resource: src/ui/ui-loader.js
- * goal: Declaratively initialize UI modules via data-action / data-source
- * channel: ui-loader
- * handoff: epoch.mm.shady-animator.v1.2.ui.loader
- */
-
+// src/ui/ui-loader.js
 import { modules } from './index.js';
 
-export function loadUI() {
+export function loadUI(uiState, drawFrame, playbackControllerRef) {
   const elements = document.querySelectorAll('[data-action]');
 
   elements.forEach(el => {
-    const action = el.dataset.action;
-    const sourceSelector = el.dataset.source;
+    const actionAttr = el.dataset.action;
+    if (!actionAttr) return;
 
-    const mod = modules[action];
-    if (!mod) {
-      console.warn(`[UI Loader] No module found for action: ${action}`);
-      return;
-    }
+    // Split multiple actions: "RegionSelector PivotPlacement TransformController"
+    const actions = actionAttr.split(/\s+/);
 
-    const sourceEl = sourceSelector
-      ? document.querySelector(sourceSelector)
-      : el;
+    actions.forEach(a => {
+      const mod = modules[a];
+      if (!mod) {
+        console.warn(`[UI Loader] No module found for action: ${a}`);
+        return;
+      }
 
-    try {
-      new mod(sourceEl, (output) => {
-        // Optional: expose last output for debugging or tests
-        window.__uiLastOutput = output;
+      // --- TimelineUI ---
+      if (a === 'TimelineUI') {
+        const instance = new mod(
+          el,
+          () => uiState.keyframes,
+          (t) => {
+            const frame = playbackControllerRef?._sample(t);
+            if (frame) {
+              uiState.region = frame.region;
+              uiState.pivot = frame.pivot;
+              uiState.transform = frame.transform;
+              drawFrame(frame);
+            }
+          }
+        );
+
+        // Store instance so KeyframeEditor + ValueEditor can call draw()
+        modules['TimelineUI'].instance = instance;
+        return;
+      }
+
+      // --- KeyframeEditor ---
+      if (a === 'KeyframeEditor') {
+        new mod(
+          el,
+          uiState,
+          () => modules['TimelineUI'].instance.draw(),
+          (t) => {
+            const frame = playbackControllerRef?._sample(t);
+            if (frame) {
+              uiState.region = frame.region;
+              uiState.pivot = frame.pivot;
+              uiState.transform = frame.transform;
+              drawFrame(frame);
+            }
+          }
+        );
+        return;
+      }
+
+      // --- KeyframeValueEditor ---
+      if (a === 'KeyframeValueEditor') {
+        new mod(
+          uiState,
+          () => modules['TimelineUI'].instance.draw(),
+          (t) => {
+            const frame = playbackControllerRef?._sample(t);
+            if (frame) {
+              uiState.region = frame.region;
+              uiState.pivot = frame.pivot;
+              uiState.transform = frame.transform;
+              drawFrame(frame);
+            }
+          }
+        );
+        return;
+      }
+
+      // --- PlaybackController ---
+      if (a === 'PlaybackController') {
+        const controller = new mod(
+          el,
+          () => uiState.keyframes,
+          (frame) => {
+            uiState.region = frame.region;
+            uiState.pivot = frame.pivot;
+            uiState.transform = frame.transform;
+            drawFrame(frame);
+          }
+        );
+
+        playbackControllerRef = controller;
+        return;
+      }
+
+      // --- Default case for RegionSelector, PivotPlacement, TransformController ---
+      new mod(el, (output) => {
+        // Broadcast UI output for KeyframeValueEditor
+        window.dispatchEvent(new CustomEvent('ui-output', {
+          detail: output
+        }));
       });
-    } catch (err) {
-      console.error(`[UI Loader] Failed to initialize ${action}:`, err);
-    }
+    });
   });
 }

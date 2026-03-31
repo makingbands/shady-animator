@@ -1,40 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Shady Animator</title>
-  <!-- Consolidated stylesheet -->
-  <link rel="stylesheet" href="./css/styles.css" />
-</head>
+  <body>
+    <div id="app">
 
-<body>
-  <div id="app">
+      <!-- Primary working canvas -->
+      <canvas
+        id="main"
+        width="800"
+        height="600"
+        data-action="RegionSelector PivotPlacement TransformController KeyframeValueEditor"
+        data-source="#main">
+      </canvas>
 
-    <!-- Primary working canvas -->
-    <canvas
-      id="main"
-      width="800"
-      height="600"
-      data-action="RegionSelector"
-      data-source="#main"
-    ></canvas>
 
-    <!-- Secondary canvas (preview, transforms, future steps) -->
-    <canvas
-      id="preview"
-      width="800"
-      height="200"
-    ></canvas>
+      <div id="ui-container">
 
-  </div>
+        <!-- Timeline -->
+        <div class="ui-section">
+          <canvas
+          id="timeline"
+          width="800"
+          height="60"
+          data-action="TimelineUI KeyframeEditor"
+          data-source="#timeline">
+        </canvas>
 
-  <!-- UI Loader -->
-  <script type="module">
-    import { loadUI } from './src/ui/ui-loader.js';
-    window.addEventListener('DOMContentLoaded', () => {
-      loadUI();
-    });
-  </script>
+        </div>
 
-</body>
+        <!-- Playback -->
+        <div class="ui-section">
+          <button
+            id="play"
+            data-action="PlaybackController"
+            data-source="#play">
+            Play
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Secondary canvas (preview, future steps) -->
+      <canvas id="preview" width="800" height="200"></canvas>
+
+    </div>
+
+    <!-- UI Loader -->
+    <script type="module">
+      import { loadUI } from './src/ui/ui-loader.js';
+      import { uiState } from './src/ui/ui-state.js';
+      import { drawFrame } from './src/ui/draw-frame.js';
+
+      let playbackControllerRef = null;
+
+      window.addEventListener('DOMContentLoaded', () => {
+        loadUI(uiState, drawFrame, playbackControllerRef);
+      });
+    </script>
+  </body>
 </html>

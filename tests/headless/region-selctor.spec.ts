@@ -14,6 +14,7 @@ test('user can drag to create a region', async ({ page }) => {
   const canvas = page.locator('canvas#main');
 
   const box = await canvas.boundingBox();
+  if (!box) throw new Error("Canvas bounding box not found");
   const startX = box.x + 20;
   const startY = box.y + 20;
   const endX = box.x + 120;
@@ -25,6 +26,7 @@ test('user can drag to create a region', async ({ page }) => {
   await page.mouse.up();
 
   const region = await page.evaluate(() => window.__lastRegion);
+  if (!region) throw new Error("Region inside Canvas not found");
   expect(region.width).toBeGreaterThan(0);
   expect(region.height).toBeGreaterThan(0);
 });
