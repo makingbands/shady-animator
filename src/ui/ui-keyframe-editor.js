@@ -45,12 +45,13 @@ export class KeyframeEditor {
     const hit = this._hitTest(x);
 
     if (hit !== null) {
-        this.selected = hit;
-        this.dragging = true;
+      this.selected = hit;
+      this.dragging = true;
 
-        window.dispatchEvent(new CustomEvent('keyframe-selected', {
-            detail: { index: hit }
-        }));
+      // 🔥 Step 17 Part 5: Dispatch selection event
+      window.dispatchEvent(new CustomEvent('keyframe-selected', {
+        detail: { index: hit }
+      }));
     }
   }
 
